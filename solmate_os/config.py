@@ -58,7 +58,23 @@ class Config:
     derate_w: float = 300.0
     schedule: list[ScheduleRule] = field(default_factory=list)
 
+    boost_watts: float = 800.0
+    boost_minutes: float = 20.0
+
+    ecoflow_mode: str = "off"  # off | simulator | cloud
+    ecoflow_host: str = "api-e.ecoflow.com"
+    ecoflow_access_key: str | None = None
+    ecoflow_secret_key: str | None = None
+    ecoflow_stream_sn: str = ""
+    ecoflow_meter_sn: str | None = None
+    ecoflow_grid_import_positive: bool = True
+    ecoflow_strategy: str = "balance"  # balance | solmate_first | stream_first | monitor
+    household_limit_w: float = 800.0
+    coord_margin_w: float = 20.0
+    coord_deadband_w: float = 25.0
+
     host: str = "127.0.0.1"
+    pin: str | None = None
     port: int = 8080
     db_path: Path = Path("solmate.sqlite3")
     retention_days: int = 365
@@ -103,7 +119,33 @@ class Config:
             for i, r in enumerate(ctl.get("schedule", []))
         ]
 
+        boost = data.get("boost", {})
+        cfg.boost_watts = float(boost.get("watts", cfg.boost_watts))
+        cfg.boost_minutes = float(boost.get("minutes", cfg.boost_minutes))
+
+        eco = data.get("ecoflow", {})
+        cfg.ecoflow_mode = eco.get("mode", cfg.ecoflow_mode)
+        if cfg.ecoflow_mode not in ("off", "simulator", "cloud"):
+            raise ValueError(f"Unbekannter EcoFlow-Modus: {cfg.ecoflow_mode!r}")
+        cfg.ecoflow_host = eco.get("host", cfg.ecoflow_host)
+        cfg.ecoflow_access_key = os.environ.get("ECOFLOW_ACCESS_KEY") or eco.get("access_key")
+        cfg.ecoflow_secret_key = os.environ.get("ECOFLOW_SECRET_KEY") or eco.get("secret_key")
+        cfg.ecoflow_stream_sn = str(eco.get("stream_sn", ""))
+        cfg.ecoflow_meter_sn = eco.get("meter_sn") or None
+        cfg.ecoflow_grid_import_positive = bool(eco.get("grid_import_positive", True))
+        cfg.ecoflow_strategy = eco.get("strategy", cfg.ecoflow_strategy)
+        if cfg.ecoflow_strategy not in ("balance", "solmate_first", "stream_first", "monitor"):
+            raise ValueError(f"Unbekannte Strategie: {cfg.ecoflow_strategy!r}")
+        cfg.household_limit_w = float(eco.get("household_limit_w", cfg.legal_limit_w))
+        cfg.coord_margin_w = float(eco.get("margin_w", cfg.coord_margin_w))
+        cfg.coord_deadband_w = float(eco.get("deadband_w", cfg.coord_deadband_w))
+        if cfg.ecoflow_mode == "cloud" and not (
+            cfg.ecoflow_access_key and cfg.ecoflow_secret_key and cfg.ecoflow_stream_sn
+        ):
+            raise ValueError("EcoFlow: access_key, secret_key und stream_sn sind nötig.")
+
         cfg.host = web.get("host", cfg.host)
+        cfg.pin = os.environ.get("SOLMATE_OS_PIN") or (str(web["pin"]) if web.get("pin") else None)
         cfg.port = int(web.get("port", cfg.port))
         cfg.db_path = Path(sto.get("path", cfg.db_path))
         cfg.retention_days = int(sto.get("retention_days", cfg.retention_days))

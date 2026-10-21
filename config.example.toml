@@ -54,9 +54,35 @@ min_w = 300
 max_w = 800
 weekdays = [0, 1, 2, 3, 4]   # 0 = Montag
 
+[boost]
+# Der große Button oben in der App
+watts = 800
+minutes = 20
+
+[ecoflow]
+# off       = keine EcoFlow-Anbindung
+# simulator = simulierter Stream + Smart Meter (nur zusammen mit dem SolMate-Simulator)
+# cloud     = echte Geräte über die EcoFlow-Developer-API
+mode = "off"
+host = "api-e.ecoflow.com"   # Europa; sonst "api.ecoflow.com"
+# access_key = "..."         # besser: Umgebungsvariablen ECOFLOW_ACCESS_KEY / ECOFLOW_SECRET_KEY
+# secret_key = "..."
+stream_sn = ""               # Seriennummer des Stream (Haupteinheit), siehe: solmate-os ecoflow-devices
+# meter_sn = ""              # Seriennummer des EcoFlow Smart Meter (falls vorhanden)
+grid_import_positive = true  # falls Netzbezug/Einspeisung vertauscht angezeigt werden: false
+# balance       = der vollere Akku führt (empfohlen)
+# solmate_first = SolMate deckt den Verbrauch zuerst, Stream den Rest
+# stream_first  = Stream zuerst, SolMate springt bei Netzbezug ein
+# monitor       = nur anzeigen und Haushaltsgrenze einhalten
+strategy = "balance"
+household_limit_w = 800      # SolMate + Stream zusammen
+margin_w = 20                # kleiner Puffer gegen Netzeinspeisung
+deadband_w = 25              # kleinere Änderungen werden nicht gesendet
+
 [web]
-host = "0.0.0.0"             # 127.0.0.1 = nur dieser Rechner; 0.0.0.0 = ganzes Heimnetz
+host = "0.0.0.0"             # 127.0.0.1 = nur dieser Rechner; 0.0.0.0 = ganzes Heimnetz (fürs iPhone nötig)
 port = 8080
+# pin = "4711"               # PIN-Abfrage in der App (empfohlen, v. a. bei Zugriff von unterwegs)
 
 [storage]
 path = "solmate.sqlite3"

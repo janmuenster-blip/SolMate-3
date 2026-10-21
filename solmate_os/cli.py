@@ -16,6 +16,7 @@ from .backend import SolMateBackend
 from .client import SolMateClient, TokenStore
 from .config import Config
 from .controller import Controller
+from .ecoflow import EcoFlowClient, SimulatedStream
 from .simulator import SimulatedSolMate
 from .storage import Storage
 from .web import create_app
@@ -39,11 +40,37 @@ def make_backend(cfg: Config) -> SolMateBackend:
     )
 
 
+def make_stream(cfg: Config, solmate: SolMateBackend):
+    if cfg.ecoflow_mode == "simulator":
+        if not isinstance(solmate, SimulatedSolMate):
+            raise SystemExit("Der EcoFlow-Simulator funktioniert nur zusammen mit dem SolMate-Simulator.")
+        return SimulatedStream(solmate)
+    if cfg.ecoflow_mode == "cloud":
+        return make_ecoflow_client(cfg)
+    return None
+
+
+def make_ecoflow_client(cfg: Config) -> EcoFlowClient:
+    if not (cfg.ecoflow_access_key and cfg.ecoflow_secret_key):
+        raise SystemExit("EcoFlow: access_key und secret_key fehlen (config.toml oder ECOFLOW_ACCESS_KEY/ECOFLOW_SECRET_KEY).")
+    return EcoFlowClient(
+        cfg.ecoflow_access_key,
+        cfg.ecoflow_secret_key,
+        cfg.ecoflow_stream_sn,
+        cfg.ecoflow_meter_sn,
+        host=cfg.ecoflow_host,
+        grid_import_positive=cfg.ecoflow_grid_import_positive,
+    )
+
+
 async def run_service(cfg: Config) -> None:
     backend = make_backend(cfg)
     storage = Storage(cfg.db_path)
     await backend.start()
-    ctl = Controller(cfg, backend, storage)
+    stream = make_stream(cfg, backend)
+    if stream is not None:
+        await stream.start()
+    ctl = Controller(cfg, backend, storage, stream=stream)
     await ctl.start()
     runner = web.AppRunner(create_app(ctl))
     await runner.setup()
@@ -62,7 +89,27 @@ async def run_service(cfg: Config) -> None:
     await runner.cleanup()
     await ctl.stop()
     await backend.stop()
+    if stream is not None:
+        await stream.stop()
     storage.close()
+
+
+async def ecoflow_tool(cfg: Config, action: str) -> None:
+    client = make_ecoflow_client(cfg)
+    await client.start()
+    try:
+        if action == "ecoflow-devices":
+            for dev in await client.device_list():
+                print(f"{dev.get('sn')}  {dev.get('productName', '')}  {dev.get('deviceName', '')}  online={dev.get('online')}")
+        else:
+            if not cfg.ecoflow_stream_sn:
+                raise SystemExit("stream_sn fehlt in der config.toml")
+            raw = await client.quota_all(cfg.ecoflow_stream_sn)
+            print(json.dumps(raw, indent=2, ensure_ascii=False))
+            state = await client.get_state()
+            print("\nErkannt:", json.dumps(state.to_dict(), indent=2, ensure_ascii=False))
+    finally:
+        await client.stop()
 
 
 async def one_shot(cfg: Config, action: str, args: argparse.Namespace) -> None:
@@ -102,6 +149,8 @@ def main(argv: list[str] | None = None) -> None:
     b = sub.add_parser("boost", help="Boost-Einspeisung starten (0 Minuten = beenden)")
     b.add_argument("minutes", type=float)
     b.add_argument("watts", type=float)
+    sub.add_parser("ecoflow-devices", help="Geräte im EcoFlow-Konto auflisten (Seriennummern)")
+    sub.add_parser("ecoflow-dump", help="Rohdaten des Stream anzeigen (zur Fehlersuche)")
     args = p.parse_args(argv)
 
     logging.basicConfig(
@@ -109,6 +158,9 @@ def main(argv: list[str] | None = None) -> None:
         format="%(asctime)s %(levelname)s %(name)s: %(message)s",
     )
     cfg = Config.load(args.config)
+    if args.cmd.startswith("ecoflow-"):
+        asyncio.run(ecoflow_tool(cfg, args.cmd))
+        return
     if cfg.mode != "simulator" and not cfg.password and not TokenStore(cfg.token_path).get(
         f"{cfg.mode}:{cfg.serial}"
     ):

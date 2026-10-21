@@ -1,0 +1,292 @@
+<!doctype html>
+<html lang="de">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>SolMate OS</title>
+<style>
+  :root {
+    --bg: #f5f6f8; --card: #ffffff; --text: #1d2330; --muted: #677085; --line: #e2e5eb;
+    --pv: #e5a100; --inject: #2f7de1; --battery: #1f9d63; --danger: #d64545; --accent: #2f7de1;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #12151b; --card: #1b2029; --text: #e7eaf0; --muted: #98a1b3; --line: #2b3240;
+      --pv: #f2b632; --inject: #5b9cf0; --battery: #3cc488; --danger: #ef6b6b; --accent: #5b9cf0;
+    }
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--text);
+         font: 15px/1.45 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; }
+  header { display: flex; align-items: center; justify-content: space-between; gap: 12px;
+           padding: 16px; max-width: 1100px; margin: 0 auto; }
+  h1 { font-size: 20px; margin: 0; }
+  h2 { font-size: 15px; margin: 0 0 12px; color: var(--muted); font-weight: 600; }
+  .pill { padding: 4px 10px; border-radius: 99px; font-size: 13px; background: var(--line); }
+  .pill.ok { background: color-mix(in srgb, var(--battery) 20%, transparent); color: var(--battery); }
+  .pill.bad { background: color-mix(in srgb, var(--danger) 20%, transparent); color: var(--danger); }
+  main > *, .grid2 > * { min-width: 0; }
+  main { max-width: 1100px; margin: 0 auto; padding: 0 16px 32px; display: grid; gap: 16px; }
+  .card { background: var(--card); border: 1px solid var(--line); border-radius: 14px; padding: 16px; }
+  .tiles { display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: 12px; }
+  .tile .label { color: var(--muted); font-size: 13px; }
+  .tile .value { font-size: 28px; font-weight: 650; font-variant-numeric: tabular-nums; }
+  .tile .unit { font-size: 15px; color: var(--muted); margin-left: 2px; }
+  .bar { height: 8px; border-radius: 4px; background: var(--line); overflow: hidden; margin-top: 6px; }
+  .bar > div { height: 100%; background: var(--battery); transition: width .5s; }
+  .grid2 { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(300px, 100%), 1fr)); gap: 16px; }
+  canvas { width: 100%; height: 240px; display: block; }
+  .legend { display: flex; gap: 14px; flex-wrap: wrap; font-size: 13px; color: var(--muted); margin-top: 8px; }
+  .legend i { display: inline-block; width: 10px; height: 10px; border-radius: 2px; margin-right: 5px; }
+  label { display: block; font-size: 13px; color: var(--muted); margin: 10px 0 4px; }
+  input[type=number] { width: 100%; padding: 9px 10px; border-radius: 8px; border: 1px solid var(--line);
+                       background: var(--bg); color: var(--text); font: inherit; }
+  .row { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
+  button { margin-top: 14px; padding: 10px 14px; border: 0; border-radius: 8px; background: var(--accent);
+           color: #fff; font: inherit; font-weight: 600; cursor: pointer; }
+  button.secondary { background: var(--line); color: var(--text); }
+  .switch { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
+  .muted { color: var(--muted); font-size: 13px; }
+  table { width: 100%; border-collapse: collapse; font-size: 14px; }
+  td, th { text-align: left; padding: 6px 4px; border-bottom: 1px solid var(--line); }
+  th { color: var(--muted); font-weight: 600; }
+  ul.events { list-style: none; padding: 0; margin: 0; max-height: 260px; overflow: auto; font-size: 13px; }
+  ul.events li { padding: 6px 0; border-bottom: 1px solid var(--line); }
+  ul.events .error { color: var(--danger); }
+  #toast { position: fixed; bottom: 16px; left: 50%; transform: translateX(-50%); background: var(--text);
+           color: var(--bg); padding: 10px 16px; border-radius: 8px; opacity: 0; transition: opacity .3s; }
+</style>
+</head>
+<body>
+<header>
+  <div>
+    <h1>SolMate OS</h1>
+    <div class="muted" id="serial">–</div>
+  </div>
+  <span class="pill" id="online">verbinde …</span>
+</header>
+<main>
+  <section class="card">
+    <div class="tiles">
+      <div class="tile"><div class="label">PV-Leistung</div><div class="value" id="pv">–<span class="unit">W</span></div></div>
+      <div class="tile"><div class="label">Einspeisung</div><div class="value" id="inject">–<span class="unit">W</span></div></div>
+      <div class="tile"><div class="label" id="batlabel">Batterie</div><div class="value" id="bat">–<span class="unit">W</span></div></div>
+      <div class="tile"><div class="label">Ladestand</div><div class="value" id="soc">–<span class="unit">%</span></div>
+        <div class="bar"><div id="socbar" style="width:0"></div></div></div>
+      <div class="tile"><div class="label">Temperatur</div><div class="value" id="temp">–<span class="unit">°C</span></div></div>
+    </div>
+  </section>
+
+  <section class="card">
+    <h2>Verlauf (24 h)</h2>
+    <canvas id="chart"></canvas>
+    <div class="legend">
+      <span><i style="background:var(--pv)"></i>PV</span>
+      <span><i style="background:var(--inject)"></i>Einspeisung</span>
+      <span><i style="background:var(--battery)"></i>Ladestand (rechte Achse)</span>
+    </div>
+  </section>
+
+  <div class="grid2">
+    <section class="card">
+      <h2>Steuerung</h2>
+      <div class="switch">
+        <div><strong>Automatik</strong><div class="muted" id="reason">–</div></div>
+        <button class="secondary" id="autobtn" style="margin:0">–</button>
+      </div>
+      <div class="muted" id="applied" style="margin-top:10px">–</div>
+      <form id="manual">
+        <div class="row">
+          <div><label for="min_w">Mindest-Einspeisung (W)</label><input type="number" id="min_w" min="0" step="10" required></div>
+          <div><label for="max_w">Maximal-Einspeisung (W)</label><input type="number" id="max_w" min="0" step="10" required></div>
+        </div>
+        <div class="row">
+          <div><label for="reserve">Batteriereserve (%)</label><input type="number" id="reserve" min="0" max="100" step="5" required></div>
+          <div><label for="minutes">Dauer (min)</label><input type="number" id="minutes" min="0" value="60" required></div>
+        </div>
+        <button type="submit">Manuell setzen</button>
+        <div class="muted" style="margin-top:8px">Die Automatik pausiert für die angegebene Dauer (0 = bis sie wieder eingeschaltet wird).</div>
+      </form>
+    </section>
+
+    <section class="card">
+      <h2>Boost</h2>
+      <p class="muted" style="margin-top:0">Speist für kurze Zeit mit fester Leistung ein, z. B. für Waschmaschine oder Herd.</p>
+      <form id="boost">
+        <div class="row">
+          <div><label for="bwatts">Leistung (W)</label><input type="number" id="bwatts" min="0" step="10" value="600" required></div>
+          <div><label for="bmin">Dauer (min)</label><input type="number" id="bmin" min="1" value="30" required></div>
+        </div>
+        <button type="submit">Boost starten</button>
+        <button type="button" class="secondary" id="boostoff">Boost beenden</button>
+      </form>
+      <h2 style="margin-top:20px">Energie</h2>
+      <table>
+        <thead><tr><th></th><th>Heute</th><th>7 Tage</th></tr></thead>
+        <tbody id="energy"></tbody>
+      </table>
+    </section>
+  </div>
+
+  <div class="grid2">
+    <section class="card">
+      <h2>Zeitplan</h2>
+      <table><thead><tr><th>Name</th><th>Zeit</th><th>Min</th><th>Max</th></tr></thead><tbody id="schedule"></tbody></table>
+      <p class="muted">Bearbeiten in der <code>config.toml</code>, danach Dienst neu starten.</p>
+    </section>
+    <section class="card">
+      <h2>Ereignisse</h2>
+      <ul class="events" id="events"></ul>
+    </section>
+  </div>
+</main>
+<div id="toast"></div>
+
+<script>
+const $ = (id) => document.getElementById(id);
+const fmt = (v, d = 0) => (v === null || v === undefined || isNaN(v)) ? "–" : Number(v).toFixed(d);
+const css = (name) => getComputedStyle(document.documentElement).getPropertyValue(name).trim();
+let state = null, formFilled = false;
+
+function toast(msg) {
+  const t = $("toast"); t.textContent = msg; t.style.opacity = 1;
+  clearTimeout(toast.h); toast.h = setTimeout(() => t.style.opacity = 0, 2500);
+}
+
+async function api(path, body) {
+  const res = await fetch(path, body ? { method: "POST", headers: { "Content-Type": "application/json" },
+                                         body: JSON.stringify(body) } : {});
+  if (!res.ok) throw new Error(await res.text());
+  return res.json();
+}
+
+function setValue(id, text, unit) { $(id).innerHTML = `${text}<span class="unit">${unit}</span>`; }
+
+function render(s) {
+  state = s;
+  $("serial").textContent = `${s.serial} · ${({simulator: "Simulator", cloud: "Cloud", local: "Lokal"})[s.mode]}`;
+  const on = $("online");
+  on.textContent = s.online ? "online" : "offline"; on.className = "pill " + (s.online ? "ok" : "bad");
+  if (s.error) on.title = s.error;
+  const l = s.live;
+  if (l) {
+    setValue("pv", fmt(l.pv_w), "W");
+    setValue("inject", fmt(l.inject_w), "W");
+    $("batlabel").textContent = l.battery_w > 1 ? "Batterie lädt" : l.battery_w < -1 ? "Batterie entlädt" : "Batterie";
+    setValue("bat", fmt(Math.abs(l.battery_w)), "W");
+    setValue("soc", fmt(l.soc_percent), "%");
+    $("socbar").style.width = `${l.soc_percent}%`;
+    setValue("temp", fmt(l.temperature_c, 1), "°C");
+  }
+  $("autobtn").textContent = s.automatic && !s.override_until ? "Ausschalten" : "Einschalten";
+  $("reason").textContent = s.override_until
+    ? `Manuell bis ${new Date(s.override_until).toLocaleTimeString("de", {hour: "2-digit", minute: "2-digit"})}`
+    : s.automatic ? (s.decision ? `Aktiv: ${s.decision.reason}` : "Aktiv") : "Aus – Gerät behält die letzten Werte";
+  if (s.applied) {
+    $("applied").textContent = `Gesetzt: ${fmt(s.applied.min_w)}–${fmt(s.applied.max_w)} W, Reserve ${fmt(s.applied.min_battery_percent)} % (Grenze ${fmt(s.legal_limit_w)} W)`;
+    if (!formFilled) {
+      $("min_w").value = s.applied.min_w; $("max_w").value = s.applied.max_w;
+      $("reserve").value = s.applied.min_battery_percent; formFilled = true;
+    }
+  }
+  $("max_w").max = $("min_w").max = $("bwatts").max = s.legal_limit_w;
+  const days = ["Mo", "Di", "Mi", "Do", "Fr", "Sa", "So"];
+  $("schedule").innerHTML = s.schedule.length ? s.schedule.map(r => {
+    const wd = r.weekdays.length === 7 ? "" : ` (${r.weekdays.map(d => days[d]).join(", ")})`;
+    return `<tr><td>${esc(r.name)}${wd}</td><td>${r.start}–${r.end}</td><td>${fmt(r.min_w)} W</td><td>${fmt(r.max_w)} W</td></tr>`;
+  }).join("") : `<tr><td colspan="4" class="muted">Kein Zeitplan – es gelten die Standardwerte.</td></tr>`;
+}
+
+function esc(t) { const d = document.createElement("div"); d.textContent = t; return d.innerHTML; }
+
+function drawChart(rows) {
+  const c = $("chart"), dpr = window.devicePixelRatio || 1;
+  const w = c.clientWidth, h = c.clientHeight;
+  c.width = w * dpr; c.height = h * dpr;
+  const g = c.getContext("2d"); g.scale(dpr, dpr); g.clearRect(0, 0, w, h);
+  const pad = { l: 40, r: 34, t: 10, b: 22 };
+  const pw = w - pad.l - pad.r, ph = h - pad.t - pad.b;
+  g.font = "11px system-ui"; g.fillStyle = css("--muted"); g.strokeStyle = css("--line"); g.lineWidth = 1;
+  if (rows.length < 2) { g.fillText("Noch keine Daten …", pad.l, pad.t + 20); return; }
+  const t0 = Date.parse(rows[0].ts), t1 = Date.parse(rows[rows.length - 1].ts);
+  const maxW = Math.max(100, ...rows.map(r => Math.max(r.pv_w, r.inject_w))) * 1.1;
+  const x = (ts) => pad.l + (Date.parse(ts) - t0) / Math.max(1, t1 - t0) * pw;
+  const y = (v) => pad.t + ph - v / maxW * ph;
+  const ys = (v) => pad.t + ph - v / 100 * ph;
+  for (let i = 0; i <= 4; i++) {
+    const yy = pad.t + ph * i / 4;
+    g.beginPath(); g.moveTo(pad.l, yy); g.lineTo(pad.l + pw, yy); g.stroke();
+    g.textAlign = "right"; g.fillText(Math.round(maxW * (1 - i / 4)) + " W", pad.l - 4, yy + 4);
+    g.textAlign = "left"; g.fillText(Math.round(100 * (1 - i / 4)) + "%", pad.l + pw + 4, yy + 4);
+  }
+  g.textAlign = "center";
+  for (let i = 0; i <= 4; i++) {
+    const t = new Date(t0 + (t1 - t0) * i / 4);
+    g.fillText(t.toLocaleTimeString("de", { hour: "2-digit", minute: "2-digit" }), pad.l + pw * i / 4, h - 6);
+  }
+  const line = (key, color, scale, fill) => {
+    g.beginPath(); rows.forEach((r, i) => i ? g.lineTo(x(r.ts), scale(r[key])) : g.moveTo(x(r.ts), scale(r[key])));
+    g.strokeStyle = color; g.lineWidth = 2; g.stroke();
+    if (fill) {
+      g.lineTo(x(rows[rows.length - 1].ts), pad.t + ph); g.lineTo(x(rows[0].ts), pad.t + ph); g.closePath();
+      g.globalAlpha = .15; g.fillStyle = color; g.fill(); g.globalAlpha = 1;
+    }
+  };
+  line("pv_w", css("--pv"), y, true);
+  line("inject_w", css("--inject"), y, false);
+  line("soc", css("--battery"), ys, false);
+}
+
+function renderEnergy(e) {
+  const k = (v) => v >= 1000 ? `${fmt(v / 1000, 2)} kWh` : `${fmt(v)} Wh`;
+  const rows = [["PV-Ertrag", "pv_wh"], ["Eingespeist", "inject_wh"], ["Geladen", "charge_wh"], ["Entladen", "discharge_wh"]];
+  $("energy").innerHTML = rows.map(([n, key]) => `<tr><td>${n}</td><td>${k(e.today[key])}</td><td>${k(e.last_7_days[key])}</td></tr>`).join("");
+}
+
+function renderEvents(list) {
+  $("events").innerHTML = list.length ? list.map(e =>
+    `<li class="${e.level}"><span class="muted">${new Date(e.ts).toLocaleString("de", {dateStyle: "short", timeStyle: "short"})}</span> ${esc(e.message)}</li>`
+  ).join("") : `<li class="muted">Keine Ereignisse.</li>`;
+}
+
+let lastHistory = [];
+async function refresh(full) {
+  try {
+    render(await api("/api/status"));
+    if (full) {
+      lastHistory = await api("/api/history?hours=24"); drawChart(lastHistory);
+      renderEnergy(await api("/api/energy"));
+      renderEvents(await api("/api/events"));
+    }
+  } catch (err) {
+    $("online").textContent = "Dienst nicht erreichbar"; $("online").className = "pill bad";
+  }
+}
+
+$("autobtn").onclick = async () => {
+  const enable = !(state.automatic && !state.override_until);
+  render(await api("/api/automatic", { enabled: enable }));
+  toast(enable ? "Automatik eingeschaltet" : "Automatik ausgeschaltet"); refresh(true);
+};
+$("manual").onsubmit = async (ev) => {
+  ev.preventDefault();
+  try {
+    render(await api("/api/settings", { min_w: +$("min_w").value, max_w: +$("max_w").value,
+      reserve_percent: +$("reserve").value, minutes: +$("minutes").value }));
+    toast("Einstellungen gesendet"); refresh(true);
+  } catch (e) { toast("Fehler: " + e.message); }
+};
+$("boost").onsubmit = async (ev) => {
+  ev.preventDefault();
+  try { await api("/api/boost", { watts: +$("bwatts").value, minutes: +$("bmin").value }); toast("Boost gestartet"); refresh(true); }
+  catch (e) { toast("Fehler: " + e.message); }
+};
+$("boostoff").onclick = async () => { await api("/api/boost", { watts: 0, minutes: 0 }); toast("Boost beendet"); refresh(true); };
+window.addEventListener("resize", () => drawChart(lastHistory));
+
+refresh(true);
+setInterval(() => refresh(false), 5000);
+setInterval(() => refresh(true), 30000);
+</script>
+</body>
+</html>

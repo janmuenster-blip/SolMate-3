@@ -1,0 +1,63 @@
+# SolMate OS – Beispielkonfiguration. Kopieren nach config.toml und anpassen.
+
+[device]
+# simulator = ohne Gerät ausprobieren
+# cloud     = über den EET-Server (sol.eet.energy), funktioniert von überall
+# local     = direkt im Heimnetz (ws://sun2plug.local:9124/), ohne Internet
+mode = "simulator"
+serial = "SIM-0001"          # Seriennummer des SolMate (steht auf dem Gerät / in der App)
+# password = "..."           # besser: Umgebungsvariable SOLMATE_PASSWORD
+# uri = "ws://192.168.1.50:9124/"   # optional, z. B. feste IP im lokalen Modus
+
+[simulator]
+speed = 60                   # 60 = eine simulierte Minute pro Sekunde
+capacity_wh = 1600
+pv_peak_w = 880
+
+[control]
+enabled = true               # Automatik beim Start an
+interval_s = 30              # Abfrageintervall
+legal_limit_w = 800          # gesetzliche Einspeisegrenze, wird nie überschritten
+reserve_percent = 15         # Batterie nicht tiefer entladen als …
+default_min_w = 0            # gilt außerhalb aller Zeitfenster
+default_max_w = 800
+max_temp_c = 60              # ab dieser Temperatur …
+derate_w = 300               # … Einspeisung auf diesen Wert begrenzen
+
+# Zeitfenster: Grundlast decken, wenn Sie zu Hause sind. Erstes passendes Fenster gewinnt.
+[[control.schedule]]
+name = "Morgen"
+start = "06:00"
+end = "09:00"
+min_w = 200
+max_w = 600
+
+[[control.schedule]]
+name = "Abend"
+start = "17:00"
+end = "23:00"
+min_w = 250
+max_w = 800
+
+[[control.schedule]]
+name = "Nacht (Grundlast)"
+start = "23:00"
+end = "06:00"
+min_w = 80
+max_w = 150
+
+[[control.schedule]]
+name = "Homeoffice-Mittag"
+start = "11:30"
+end = "13:30"
+min_w = 300
+max_w = 800
+weekdays = [0, 1, 2, 3, 4]   # 0 = Montag
+
+[web]
+host = "0.0.0.0"             # 127.0.0.1 = nur dieser Rechner; 0.0.0.0 = ganzes Heimnetz
+port = 8080
+
+[storage]
+path = "solmate.sqlite3"
+retention_days = 365

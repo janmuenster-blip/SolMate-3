@@ -1,0 +1,33 @@
+"""Gemeinsame Schnittstelle für echte Geräte und den Simulator."""
+
+from __future__ import annotations
+
+from typing import Any, Protocol
+
+from .models import InjectionSettings, LiveValues
+
+
+class SolMateBackend(Protocol):
+    """Alles, was die Steuerung und die Weboberfläche vom Gerät brauchen."""
+
+    serial: str
+
+    async def start(self) -> None: ...
+
+    async def stop(self) -> None: ...
+
+    async def is_online(self) -> bool: ...
+
+    async def get_info(self) -> dict[str, Any]: ...
+
+    async def get_live_values(self) -> LiveValues: ...
+
+    async def get_injection_settings(self) -> InjectionSettings: ...
+
+    async def set_max_injection(self, watts: float) -> None: ...
+
+    async def set_min_injection(self, watts: float) -> None: ...
+
+    async def set_min_battery_percent(self, percent: float) -> None: ...
+
+    async def set_boost(self, seconds: int, watts: float) -> None: ...

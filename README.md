@@ -89,6 +89,7 @@ iPad Pro 9,7" mit iPadOS 16, quer passt alles ohne Scrollen auf einen Bildschirm
 | **Müllabfuhr** | Nächster Termin für Gelben Sack, Papier, Restmüll; Banner „Heute Abend rausstellen“ am Vortag | iCal-Link/-Datei der Gemeinde oder feste Rhythmen |
 | **Akkus** | Ladestand von SolMate 3, Stream und allen weiteren EcoFlow-Geräten, Laden/Entladen; Solar gesamt, Hausverbrauch, Netz | SolMate-API, EcoFlow-Developer-API, Smart Meter |
 | **Solar · PowerStream** | Erzeugung jetzt (PV1/PV2), Abgabe ins Haus, Ertrag heute; Prognose heute/morgen als Kurve mit Ist-Werten; Wetter für 3 Tage | EcoFlow-API, [Open-Meteo](https://open-meteo.com) (kostenlos, ohne Schlüssel) |
+| **Shelly** | Aktueller Hausverbrauch je Phase vom Shelly am Zählerkasten; einzelne Verbraucher (Steckdosen) mit Watt und kWh heute | Lokale Shelly-API (Gen1–Gen4) |
 | **Strom & Kosten** | Tarif, Netzbezug und Kosten heute/Monat, Ersparnis durch Solarstrom, Hochrechnung Guthaben/Nachzahlung, Zählerstand eintragen, Button zur EnBW-App | `[home.tariff]` + Smart Meter + eingetragene Zählerstände |
 
 **Einrichten** – alles im Abschnitt `[home]` der `config.toml` (Vorlage in `config.example.toml`):
@@ -99,8 +100,12 @@ iPad Pro 9,7" mit iPadOS 16, quer passt alles ohne Scrollen auf einen Bildschirm
    unter `[home.waste.types.*]`. Ohne Kalender gehen auch feste Rhythmen (`[[home.waste.rules]]`).
 2. **EcoFlow-Geräte:** `solmate-os -c config.toml ecoflow-devices` zeigt alle Seriennummern. Weitere Stream-Einheiten und
    den PowerStream als `[[home.devices]]` eintragen. Prüfen: `solmate-os -c config.toml ecoflow-dump <SN>`.
-3. **Prognose:** Unter `[home.forecast]` Breiten-/Längengrad und je Modulfläche kWp, Neigung und Ausrichtung eintragen.
-4. **EnBW-Tarif:** EnBW bietet Privatkunden **keine offizielle Schnittstelle** an; ein automatischer Login in die EnBW-App
+3. **Shelly (optional):** Jeden Shelly unter `[[home.shelly]]` mit seiner IP eintragen – `role = "grid"` für den
+   Zähler am Zählerkasten (Pro 3EM, 3EM, EM), `role = "load"` für einzelne Steckdosen/Verbraucher. Der Shelly muss im
+   selben Netz wie der Rechner sein; am besten im Router eine feste IP vergeben. Ein Shelly am Zählerkasten liefert
+   Netzbezug und Kosten auch ohne EcoFlow Smart Meter und hat Vorrang vor diesem.
+4. **Prognose:** Unter `[home.forecast]` Breiten-/Längengrad und je Modulfläche kWp, Neigung und Ausrichtung eintragen.
+5. **EnBW-Tarif:** EnBW bietet Privatkunden **keine offizielle Schnittstelle** an; ein automatischer Login in die EnBW-App
    wäre unzuverlässig und verstößt gegen die Nutzungsbedingungen. Deshalb einmalig aus der EnBW-App bzw. „Mein EnBW“
    übernehmen: Arbeitspreis, Grundpreis, Abschlag, Beginn des Abrechnungsjahres und Zählerstand zu diesem Datum.
    Zählerstände trägt man dann in der Hausansicht ein (gleich wie in der EnBW-App) – daraus entsteht die Hochrechnung.
@@ -210,6 +215,7 @@ sudo systemctl enable --now solmate-os
 | `solmate_os/home.py` | Hausansicht: fasst alle Quellen zusammen, fragt weitere EcoFlow-Geräte ab |
 | `solmate_os/waste.py` | Abfallkalender (ICS mit Wiederholungen, feste Rhythmen) |
 | `solmate_os/forecast.py` | PV-Prognose über Open-Meteo |
+| `solmate_os/shelly.py` | Shelly-Strommessung über die lokale API (Gen1–Gen4) |
 | `solmate_os/tariff.py` | Stromkosten, Ersparnis, Jahreshochrechnung |
 | `solmate_os/storage.py` | SQLite-Speicher, Verlauf, Energiebilanz |
 | `solmate_os/web.py`, `static/` | REST-API, Web-App, Manifest, Service Worker, Icons |

@@ -18,6 +18,7 @@ import aiohttp
 from .config import Config, HomeDevice
 from .ecoflow import EcoFlowClient, _find
 from .forecast import SimulatedForecast, SolarForecast
+from .shelly import ShellyClient, ShellyDevice
 from .storage import Storage
 from .tariff import summary as tariff_summary
 from .waste import WasteCalendar
@@ -94,6 +95,20 @@ class SimulatedDevices:
                 "powGetBpCms": round(80 * sun - 120 * (1 - sun))}
 
 
+class SimulatedShelly:
+    """Zwei Verbraucher mit Shelly Plug für den Simulator."""
+
+    def __init__(self, seed: int | None = None):
+        self.rng = random.Random(seed)
+        self.devices = [ShellyDevice("Waschmaschine", "sim", "load"), ShellyDevice("Kühlschrank", "sim", "load")]
+
+    def read(self, name: str, now: datetime) -> dict[str, Any]:
+        if name == "Waschmaschine":
+            on = 10 <= now.hour < 12 or 18 <= now.hour < 19
+            return {"power_w": round(self.rng.uniform(150, 2100), 1) if on else 0.0, "phases_w": []}
+        return {"power_w": round(self.rng.choice([0.0, 0.0, 85.0, 92.0]), 1), "phases_w": []}
+
+
 class HomeService:
     def __init__(
         self,
@@ -132,6 +147,11 @@ class HomeService:
             elif cfg.ecoflow_access_key and cfg.ecoflow_secret_key:
                 self.ecoflow = EcoFlowClient(cfg.ecoflow_access_key, cfg.ecoflow_secret_key, "", host=cfg.ecoflow_host)
                 self._own_ecoflow = True
+        self.sim_shelly = SimulatedShelly() if self.simulated and not self.home.shelly else None
+        self.shelly_devices = self.sim_shelly.devices if self.sim_shelly else list(self.home.shelly)
+        self.shelly_clients = {d.name: ShellyClient(d) for d in self.shelly_devices}
+        self.shelly_state: dict[str, dict[str, Any]] = {}
+        self._shelly_task: asyncio.Task | None = None
         self.device_state: dict[str, dict[str, Any]] = {}
         self.device_error: dict[str, str] = {}
         self._session: aiohttp.ClientSession | None = None
@@ -145,14 +165,17 @@ class HomeService:
             timeout=aiohttp.ClientTimeout(total=20), headers={"User-Agent": "solmate-os"}, trust_env=True
         )
         self._task = asyncio.create_task(self._run(), name="home-service")
+        if self.shelly_devices:
+            self._shelly_task = asyncio.create_task(self._shelly_run(), name="home-shelly")
 
     async def stop(self) -> None:
-        if self._task:
-            self._task.cancel()
-            try:
-                await self._task
-            except asyncio.CancelledError:
-                pass
+        for task in (self._task, self._shelly_task):
+            if task:
+                task.cancel()
+                try:
+                    await task
+                except asyncio.CancelledError:
+                    pass
         if self._session:
             await self._session.close()
         if self._own_ecoflow and self.ecoflow:
@@ -175,6 +198,31 @@ class HomeService:
             except Exception:  # nie die ganze Hausansicht anhalten
                 log.exception("Hausansicht: Fehler beim Aktualisieren")
             await asyncio.sleep(self.home.interval_s)
+
+    async def _shelly_run(self) -> None:
+        while True:
+            await self.poll_shelly()
+            await asyncio.sleep(self.home.shelly_interval_s)
+
+    async def poll_shelly(self) -> None:
+        """Shelly-Messgeräte im Heimnetz abfragen (schnell, lokal; Standard alle 10 s)."""
+        now = self.power_clock()
+        for dev in self.shelly_devices:
+            try:
+                if self.sim_shelly:
+                    data = self.sim_shelly.read(dev.name, now)
+                else:
+                    data = await self.shelly_clients[dev.name].read(self._session)
+                self.shelly_state[dev.name] = {**data, "online": True, "error": None, "updated": now.isoformat()}
+                self.storage.add_shelly_sample(now, dev.name, data["power_w"])
+            except asyncio.CancelledError:
+                raise
+            except Exception as exc:
+                old = self.shelly_state.get(dev.name, {})
+                self.shelly_state[dev.name] = {**old, "online": False, "error": f"{dev.name}: {exc or type(exc).__name__}"}
+
+    def _grid_shellies(self) -> list[ShellyDevice]:
+        return [d for d in self.shelly_devices if d.role == "grid"]
 
     async def poll_devices(self) -> None:
         now = self.power_clock()
@@ -206,7 +254,7 @@ class HomeService:
         pnow = self.power_clock()
         midnight = pnow.replace(hour=0, minute=0, second=0, microsecond=0)
         month = midnight.replace(day=1)
-        has_meter = self.ctl is not None and self.ctl.stream_backend is not None
+        has_meter = self.has_grid_meter
         out = {}
         for key, since in (("today", midnight), ("month", month)):
             own = self.storage.energy(since)["inject_wh"] + self.storage.stream_feed_energy(since)
@@ -215,12 +263,22 @@ class HomeService:
                 e = self.storage.home_energy(dev.sn, since)
                 per_device[dev.sn] = e
                 own += e["out_wh"]
-            grid = self.storage.grid_energy(since) if has_meter else {}
+            if self._grid_shellies():  # Shelly am Zählerkasten hat Vorrang
+                grid = {"grid_import_wh": 0.0, "grid_export_wh": 0.0}
+                for d in self._grid_shellies():
+                    e = self.storage.shelly_energy(d.name, since)
+                    grid["grid_import_wh"] += e["import_wh"]
+                    grid["grid_export_wh"] += e["export_wh"]
+            else:
+                grid = self.storage.grid_energy(since) if has_meter else {}
+            loads = {d.name: self.storage.shelly_energy(d.name, since)["import_wh"]
+                     for d in self.shelly_devices if d.role == "load"}
             out[key] = {
                 "own_wh": own,
                 "import_wh": grid.get("grid_import_wh"),
                 "export_wh": grid.get("grid_export_wh", 0.0),
                 "devices": per_device,
+                "loads": loads,
             }
         self._energy_cache = (now, out)
         return out
@@ -300,9 +358,26 @@ class HomeService:
                 self.home.tariff, self.storage.meter_readings(), energy["today"], energy["month"],
                 pnow.date(), day_fraction,
             ),
-            "has_smart_meter": self.ctl is not None and self.ctl.stream_backend is not None,
+            "has_smart_meter": self.has_grid_meter,
             "house": self._house(),
+            "consumers": self._consumers(energy),
         }
+
+    @property
+    def has_grid_meter(self) -> bool:
+        return bool(self._grid_shellies()) or (self.ctl is not None and self.ctl.stream_backend is not None)
+
+    def _consumers(self, energy: dict[str, Any]) -> list[dict[str, Any]]:
+        out = []
+        for d in self.shelly_devices:
+            if d.role != "load":
+                continue
+            st = self.shelly_state.get(d.name, {})
+            out.append({
+                "name": d.name, "power_w": st.get("power_w"), "online": st.get("online", False),
+                "error": st.get("error"), "today_kwh": round(energy["today"]["loads"].get(d.name, 0.0) / 1000, 2),
+            })
+        return out
 
     def _house(self) -> dict[str, Any]:
         """Momentaufnahme fürs ganze Haus: Solar aller Geräte, Verbrauch und Netz (Smart Meter)."""
@@ -315,8 +390,27 @@ class HomeService:
             solar += stream.pv_w
         for dev in self.devices:
             solar += self.device_state.get(dev.sn, {}).get("pv_w") or 0.0
-        return {
+        house = {
             "solar_w": round(solar),
             "load_w": stream.load_w if stream else None,
             "grid_w": stream.grid_w if stream else None,
+            "source": "ecoflow" if stream else None,
+            "phases_w": [],
         }
+        grid_states = [self.shelly_state.get(d.name) for d in self._grid_shellies()]
+        grid_states = [g for g in grid_states if g and g.get("online") and g.get("power_w") is not None]
+        if grid_states:
+            # Hausverbrauch = Netz + alles, was die eigenen Geräte gerade ins Hausnetz abgeben.
+            own = 0.0
+            if ctl is not None and ctl.last_live is not None:
+                own += ctl.last_live.inject_w
+            if stream is not None and stream.feed_in_w is not None:
+                own += stream.feed_in_w
+            for dev in self.devices:
+                own += self.device_state.get(dev.sn, {}).get("out_w") or 0.0
+            grid = sum(g["power_w"] for g in grid_states)
+            house.update({
+                "grid_w": round(grid, 1), "load_w": round(max(0.0, grid + own), 1), "source": "shelly",
+                "phases_w": grid_states[0].get("phases_w", []) if len(grid_states) == 1 else [],
+            })
+        return house

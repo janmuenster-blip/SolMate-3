@@ -10,6 +10,7 @@ from pathlib import Path
 from typing import Any
 
 from .forecast import ForecastConfig, Plane
+from .shelly import ShellyDevice
 from .tariff import Tariff
 from .waste import DEFAULT_TYPES, WasteRule, WasteType
 
@@ -56,6 +57,8 @@ class HomeConfig:
     title: str = "Unser Haus"
     interval_s: float = 60.0
     devices: list[HomeDevice] = field(default_factory=list)
+    shelly: list[ShellyDevice] = field(default_factory=list)
+    shelly_interval_s: float = 10.0
     waste_types: list[WasteType] = field(default_factory=lambda: list(DEFAULT_TYPES))
     waste_ics_urls: list[str] = field(default_factory=list)
     waste_ics_files: list[Path] = field(default_factory=list)
@@ -76,6 +79,17 @@ class HomeConfig:
                 HomeDevice(str(d["sn"]), d.get("name", ""), kind,
                            float(d["watts_scale"]) if "watts_scale" in d else None)
             )
+
+        h.shelly_interval_s = max(2.0, float(data.get("shelly_interval_s", h.shelly_interval_s)))
+        for d in data.get("shelly", []):
+            role = d.get("role", "load")
+            if role not in ("grid", "load"):
+                raise ValueError(f"Shelly: unbekannte Rolle {role!r} (grid oder load)")
+            h.shelly.append(ShellyDevice(
+                d.get("name", d["host"]), str(d["host"]), role,
+                os.environ.get(d["password_env"]) if d.get("password_env") else d.get("password"),
+                bool(d.get("invert", False)),
+            ))
 
         w = data.get("waste", {})
         names = {t.key: t for t in DEFAULT_TYPES}

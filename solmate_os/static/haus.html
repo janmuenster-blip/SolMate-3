@@ -37,7 +37,7 @@
   header { display: flex; align-items: center; gap: 18px; margin-bottom: 8px; }
   header h1 { font-size: 24px; margin: 0; font-weight: 750; letter-spacing: -.01em; }
   header .date { color: var(--muted); font-size: 14px; }
-  header .clock { margin-left: auto; font-size: 32px; font-weight: 300; font-variant-numeric: tabular-nums; letter-spacing: -.02em; }
+  header .clock { font-size: 32px; line-height: 1.1; font-weight: 300; font-variant-numeric: tabular-nums; letter-spacing: -.02em; }
   header .weather { display: flex; align-items: center; gap: 8px; font-size: 15px; }
   header .weather .ico { font-size: 30px; line-height: 1; }
   header .weather b { font-size: 22px; font-weight: 600; }
@@ -97,6 +97,11 @@
   canvas { width: 100%; height: 125px; display: block; }
   .flow { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; margin-top: 12px; padding-top: 12px; border-top: 1px solid var(--line); }
   .flow .v { font-size: 24px; font-weight: 700; }
+  .loads { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 10px; }
+  .load { background: var(--soft); border-radius: 99px; padding: 5px 12px; font-size: 13.5px; white-space: nowrap; }
+  .load b { font-variant-numeric: tabular-nums; }
+  .load.on { background: color-mix(in srgb, var(--warn) 18%, var(--card)); }
+  .load.off { color: var(--muted); }
   .legend { display: flex; gap: 14px; font-size: 12px; color: var(--muted); margin-top: 6px; flex-wrap: wrap; }
   .legend i { display: inline-block; width: 12px; height: 3px; border-radius: 2px; margin-right: 5px; vertical-align: middle; }
   .days { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; margin-top: 10px; }
@@ -123,14 +128,19 @@
   form.meter { display: flex; gap: 8px; margin-top: 8px; }
   form.meter input { flex: 1; min-width: 0; padding: 10px; border-radius: 11px; border: 1px solid var(--line);
                      background: var(--bg); color: var(--text); font: inherit; font-size: 16px; -webkit-user-select: text; user-select: text; }
-  .foot { text-align: center; color: var(--muted); font-size: 12px; margin-top: 8px; }
+  .foot { color: var(--muted); font-size: 11px; }
   #toast { position: fixed; bottom: calc(18px + env(safe-area-inset-bottom)); left: 50%; transform: translateX(-50%);
            background: var(--text); color: var(--bg); padding: 10px 16px; border-radius: 10px; opacity: 0;
            transition: opacity .3s; pointer-events: none; }
   /* iPad quer (1024×768): alles ohne Scrollen auf einen Bildschirm */
   @media (orientation: landscape) and (max-height: 820px) {
     .bin .more { display: none; }
-    .foot { position: fixed; right: 12px; bottom: 4px; margin: 0; font-size: 11px; opacity: .7; }
+    .ring { width: 80px; height: 80px; }
+    .ring .pct { font-size: 21px; }
+    .bat { padding: 6px; }
+    .bat .name { margin-top: 2px; }
+    .flow { margin-top: 8px; padding-top: 8px; }
+    .loads { margin-top: 6px; }
   }
   [hidden] { display: none !important; }
 </style>
@@ -143,7 +153,7 @@
       <div class="date" id="date">–</div>
     </div>
     <div class="weather" id="weather" hidden><span class="ico" id="wico"></span><div><b id="wtemp">–</b><div class="muted" id="wtext"></div></div></div>
-    <div class="clock" id="clock">--:--</div>
+    <div style="margin-left:auto;text-align:right"><div class="clock" id="clock">--:--</div><div class="foot" id="foot"></div></div>
     <a class="nav" href="/">SolMate ›</a>
   </header>
 
@@ -161,9 +171,10 @@
       <div class="bats" id="bats"></div>
       <div class="flow">
         <div class="kpi"><div class="l">☀️ Solar gesamt</div><div class="v num" id="hsolar">–</div></div>
-        <div class="kpi"><div class="l">🏠 Hausverbrauch</div><div class="v num" id="hload">–</div></div>
+        <div class="kpi"><div class="l">🏠 Hausverbrauch</div><div class="v num" id="hload">–</div><div class="s" id="hphases"></div></div>
         <div class="kpi"><div class="l" id="hgridl">🔌 Netz</div><div class="v num" id="hgrid">–</div></div>
       </div>
+      <div class="loads" id="loads" hidden></div>
     </section>
 
     <section class="card c-solar">
@@ -200,7 +211,6 @@
       </form>
     </section>
   </div>
-  <div class="foot" id="foot"></div>
 </div>
 <div id="toast"></div>
 
@@ -407,7 +417,14 @@ function render(d) {
   $("hsolar").innerHTML = W(hs.solar_w); $("hload").innerHTML = W(hs.load_w);
   $("hgridl").textContent = hs.grid_w == null ? "🔌 Netz" : hs.grid_w >= 0 ? "🔌 Netzbezug" : "🔌 Einspeisung";
   $("hgrid").innerHTML = W(hs.grid_w == null ? null : Math.abs(hs.grid_w));
-  $("foot").textContent = `Aktualisiert ${new Date().toLocaleTimeString("de-DE", { hour: "2-digit", minute: "2-digit" })}` + (d.simulated ? " · Simulator" : "");
+  $("hphases").textContent = hs.phases_w && hs.phases_w.length ? hs.phases_w.map((p, i) => `L${i + 1} ${fmt(p)}`).join(" · ") + " W"
+    : hs.source === "shelly" ? "Shelly-Zähler" : "";
+  const cons = d.consumers || [];
+  $("loads").hidden = !cons.length;
+  $("loads").innerHTML = cons.map(c => !c.online
+    ? `<span class="load off" title="${esc(c.error || "")}">🔌 ${esc(c.name)}: offline</span>`
+    : `<span class="load ${c.power_w > 50 ? "on" : ""}">🔌 ${esc(c.name)} <b>${fmt(c.power_w)} W</b> · heute ${fmt(c.today_kwh, 2)} kWh</span>`).join("");
+  $("foot").textContent = `aktualisiert ${new Date().toLocaleTimeString("de-DE", { hour: "2-digit", minute: "2-digit" })}` + (d.simulated ? " · Simulator" : "");
 }
 
 async function refresh() {
@@ -433,7 +450,7 @@ window.addEventListener("resize", () => data && drawChart(data.solar, data.devic
 if ("serviceWorker" in navigator && window.isSecureContext) navigator.serviceWorker.register("/sw.js").catch(() => {});
 
 tick(); setInterval(tick, 1000);
-refresh(); setInterval(() => { if (!document.hidden) refresh(); }, 30000);
+refresh(); setInterval(() => { if (!document.hidden) refresh(); }, 10000);
 keepAwake();
 // Um Mitternacht neu laden (neuer Tag, Speicher frisch).
 setInterval(() => { const n = new Date(); if (n.getHours() === 0 && n.getMinutes() === 0 && n.getSeconds() < 2) location.reload(); }, 1000);

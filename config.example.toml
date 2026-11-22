@@ -109,6 +109,24 @@ interval_s = 60              # wie oft die EcoFlow-Geräte abgefragt werden
 # sn = "HW51..."
 # kind = "powerstream"
 
+# --- Shelly: aktueller Stromverbrauch (lokal im Heimnetz, ohne Cloud) ---------------------------
+# role = "grid": Zähler am Zählerkasten (Shelly Pro 3EM, 3EM, EM …) → Netzbezug/Einspeisung,
+#                echter Hausverbrauch und Stromkosten (hat Vorrang vor dem EcoFlow Smart Meter)
+# role = "load": einzelner Verbraucher (Shelly Plug, Plus PM, 1PM …) → eigene Zeile mit Watt und kWh heute
+# Im Simulator werden ohne Einträge eine Waschmaschine und ein Kühlschrank simuliert.
+# shelly_interval_s = 10      # Abfrageintervall in Sekunden
+# [[home.shelly]]
+# name = "Hauptzähler"
+# host = "192.168.1.40"       # IP des Shelly (feste IP im Router vergeben)
+# role = "grid"
+# invert = false              # true, falls Bezug als Einspeisung angezeigt wird (Wandler falsch herum)
+# password_env = "SHELLY_PASSWORD"   # nur falls im Shelly ein Passwort gesetzt ist (Umgebungsvariable)
+#
+# [[home.shelly]]
+# name = "Waschmaschine"
+# host = "192.168.1.41"
+# role = "load"
+
 # --- Müllabfuhr ---------------------------------------------------------------------------------
 # Am einfachsten: den iCal-Link (Abo-Link / .ics-Export) vom Abfallkalender Ihrer Gemeinde eintragen.
 # Mehrere Links sind möglich, z. B. ics_url = ["https://…/rest.ics", "https://…/gelb.ics"]

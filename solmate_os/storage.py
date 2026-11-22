@@ -26,6 +26,10 @@ CREATE TABLE IF NOT EXISTS home_samples (
     soc REAL, pv_w REAL, out_w REAL, battery_w REAL
 );
 CREATE INDEX IF NOT EXISTS home_samples_ts ON home_samples(sn, ts);
+CREATE TABLE IF NOT EXISTS shelly_samples (
+    ts TEXT NOT NULL, name TEXT NOT NULL, power_w REAL
+);
+CREATE INDEX IF NOT EXISTS shelly_samples_ts ON shelly_samples(name, ts);
 CREATE TABLE IF NOT EXISTS meter_readings (
     day TEXT PRIMARY KEY, kwh REAL NOT NULL
 );
@@ -135,6 +139,27 @@ class Storage:
         )
         return e["feed_in_w"]
 
+    def add_shelly_sample(self, ts: datetime, name: str, power_w: float) -> None:
+        self.db.execute(
+            "INSERT INTO shelly_samples VALUES (?, ?, ?)", (ts.astimezone(timezone.utc).isoformat(), name, power_w)
+        )
+        self.db.commit()
+
+    def shelly_energy(self, name: str, since: datetime) -> dict[str, float]:
+        """Bezug (positiv) und Rücklieferung (negativ) getrennt aufsummiert, in Wh."""
+        rows = self.db.execute(
+            "SELECT ts, power_w FROM shelly_samples WHERE name = ? AND ts >= ? AND power_w IS NOT NULL ORDER BY ts",
+            (name, since.astimezone(timezone.utc).isoformat()),
+        ).fetchall()
+        out = {"import_wh": 0.0, "export_wh": 0.0}
+        for a, b in zip(rows, rows[1:]):
+            dt_h = (datetime.fromisoformat(b["ts"]) - datetime.fromisoformat(a["ts"])).total_seconds() / 3600
+            if dt_h <= 0 or dt_h > 0.5:
+                continue
+            e = (a["power_w"] + b["power_w"]) / 2 * dt_h
+            out["import_wh" if e > 0 else "export_wh"] += abs(e)
+        return {k: round(v, 1) for k, v in out.items()}
+
     def set_meter_reading(self, day: str, kwh: float) -> None:
         self.db.execute("INSERT OR REPLACE INTO meter_readings VALUES (?, ?)", (day, kwh))
         self.db.commit()
@@ -187,6 +212,7 @@ class Storage:
         cur = self.db.execute("DELETE FROM samples WHERE ts < ?", (cutoff,))
         self.db.execute("DELETE FROM stream_samples WHERE ts < ?", (cutoff,))
         self.db.execute("DELETE FROM home_samples WHERE ts < ?", (cutoff,))
+        self.db.execute("DELETE FROM shelly_samples WHERE ts < ?", (cutoff,))
         self.db.execute("DELETE FROM events WHERE ts < ?", (cutoff,))
         self.db.commit()
         return cur.rowcount

@@ -97,9 +97,13 @@
   canvas { width: 100%; height: 125px; display: block; }
   .flow { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; margin-top: 12px; padding-top: 12px; border-top: 1px solid var(--line); }
   .flow .v { font-size: 24px; font-weight: 700; }
-  .loads { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 10px; }
-  .load { background: var(--soft); border-radius: 99px; padding: 5px 12px; font-size: 13.5px; white-space: nowrap; }
-  .load b { font-variant-numeric: tabular-nums; }
+  .loads { display: grid; grid-template-columns: repeat(auto-fit, minmax(130px, 1fr)); gap: 6px; margin-top: 10px; }
+  .load { background: var(--soft); border-radius: 10px; padding: 5px 10px; min-width: 0; }
+  .load .n { font-size: 12px; line-height: 1.25; color: var(--muted); overflow: hidden; display: -webkit-box;
+             -webkit-line-clamp: 2; -webkit-box-orient: vertical; }
+  .load .w { white-space: nowrap; }
+  .load b { font-size: 17px; font-variant-numeric: tabular-nums; }
+  .load span { font-size: 12px; color: var(--muted); }
   .load.on { background: color-mix(in srgb, var(--warn) 18%, var(--card)); }
   .load.off { color: var(--muted); }
   .legend { display: flex; gap: 14px; font-size: 12px; color: var(--muted); margin-top: 6px; flex-wrap: wrap; }
@@ -135,8 +139,18 @@
   /* iPad quer (1024×768): alles ohne Scrollen auf einen Bildschirm */
   @media (orientation: landscape) and (max-height: 820px) {
     .bin .more { display: none; }
-    .ring { width: 80px; height: 80px; }
-    .ring .pct { font-size: 21px; }
+    .ring { width: 60px; height: 60px; }
+    .ring .pct { font-size: 17px; }
+    .bat { padding: 4px; }
+    .loads { grid-template-columns: repeat(auto-fit, minmax(110px, 1fr)); }
+    .bat .name { font-size: 14px; }
+    .bat .state { font-size: 12px; }
+    .flow .v { font-size: 21px; }
+    .flow .l { font-size: 12px; }
+    .tariff > div { min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .proj .muted { font-size: 12px; }
+    td, th { padding: 3px 2px; }
+    .wrap { padding-top: 6px; }
     .bat { padding: 6px; }
     .bat .name { margin-top: 2px; }
     .flow { margin-top: 8px; padding-top: 8px; }
@@ -369,7 +383,7 @@ function drawChart(s, deviceTime) {
 
 function renderCosts(t, hasMeter) {
   $("prov").textContent = t.provider || "Stromtarif";
-  $("tname").textContent = t.configured ? `${t.name ? t.name + " · " : ""}${fmt(t.price_ct_kwh, 2)} ct · ${fmt(t.base_eur_month, 2)} €/Mon.` : "Tarif noch nicht eingetragen";
+  $("tname").textContent = t.configured ? `${t.name ? t.name + " · " : ""}${fmt(t.price_ct_kwh, 2)} ct/kWh` : "Tarif noch nicht eingetragen";
   $("enbw").href = t.app_url || "https://www.enbw.com/mein-enbw";
   $("enbw").textContent = `${t.provider || "EnBW"}-App öffnen`;
   const d = t.today, m = t.month;
@@ -421,9 +435,9 @@ function render(d) {
     : hs.source === "shelly" ? "Shelly-Zähler" : "";
   const cons = d.consumers || [];
   $("loads").hidden = !cons.length;
-  $("loads").innerHTML = cons.map(c => !c.online
-    ? `<span class="load off" title="${esc(c.error || "")}">🔌 ${esc(c.name)}: offline</span>`
-    : `<span class="load ${c.power_w > 50 ? "on" : ""}">🔌 ${esc(c.name)} <b>${fmt(c.power_w)} W</b> · heute ${fmt(c.today_kwh, 2)} kWh</span>`).join("");
+  $("loads").innerHTML = cons.map(c => `<div class="load ${!c.online ? "off" : c.power_w > 50 ? "on" : ""}" title="${esc(c.error || c.name)}">
+    <div class="n">${esc(c.name).replace(/\//g, "/\u200b")}</div>
+    <div class="w">${c.online ? `<b>${fmt(c.power_w)} W</b> <span>· ${fmt(c.today_kwh, 1)} kWh</span>` : `<span>offline</span>`}</div></div>`).join("");
   $("foot").textContent = `aktualisiert ${new Date().toLocaleTimeString("de-DE", { hour: "2-digit", minute: "2-digit" })}` + (d.simulated ? " · Simulator" : "");
 }
 

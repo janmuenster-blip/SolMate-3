@@ -114,6 +114,9 @@ interval_s = 60              # wie oft die EcoFlow-Geräte abgefragt werden
 # Mehrere Links sind möglich, z. B. ics_url = ["https://…/rest.ics", "https://…/gelb.ics"]
 [home.waste]
 # ics_url = "https://www.beispiel-abfallkalender.de/export/ical?strasse=…"
+# Stuttgart (Abfallwirtschaft Stuttgart), Straße und Hausnummer anpassen:
+# ics_url = "https://service.stuttgart.de/lhs-services/aws/api/ical?street=Musterstr.&streetnr=1"
+# Der Stuttgarter Kalender reicht nur einige Wochen voraus; er wird alle 6 Stunden neu geladen.
 # ics_file = "abfall.ics"    # alternativ heruntergeladene Datei
 
 # Ohne Kalenderdatei: feste Rhythmen. start = ein bekannter Abfuhrtermin.

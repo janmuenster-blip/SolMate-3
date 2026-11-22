@@ -141,7 +141,7 @@ class EcoFlowClient:
         self._main_sn: str | None = None
 
     async def start(self) -> None:
-        self._session = aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=20))
+        self._session = aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=20), trust_env=True)
 
     async def stop(self) -> None:
         if self._session:

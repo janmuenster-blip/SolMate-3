@@ -140,3 +140,48 @@ async def test_home_api_simulator(tmp_path):
         assert (await r.json())["tariff"]["readings"] == []
         page = await (await client.get("/haus")).text()
         assert "Müllabfuhr" in page
+
+
+STUTTGART_ICS = """BEGIN:VCALENDAR
+VERSION:2.0
+PRODID:-//Sabre//Sabre VObject 4.5.8//EN
+X-WR-CALNAME:Abfallwirtschaft Stuttgart
+BEGIN:VTIMEZONE
+TZID:Europe/Berlin
+BEGIN:DAYLIGHT
+DTSTART:19700329T020000
+RRULE:FREQ=YEARLY;BYMONTH=3;BYDAY=-1SU
+END:DAYLIGHT
+END:VTIMEZONE
+BEGIN:VEVENT
+SUMMARY:Restmüll 02-wöchentl.
+DTSTART;TZID=Europe/Berlin:20261124T063000
+DESCRIPTION:02-wöchentl.
+BEGIN:VALARM
+TRIGGER:-PT11H30M
+DESCRIPTION:Restmüll
+END:VALARM
+END:VEVENT
+BEGIN:VEVENT
+SUMMARY:Altpapier 03-wöchentl.
+DTSTART;TZID=Europe/Berlin:20261126T063000
+END:VEVENT
+BEGIN:VEVENT
+SUMMARY:Gelber Sack 03-wöchentl.
+DTSTART;TZID=Europe/Berlin:20261203T063000
+END:VEVENT
+BEGIN:VEVENT
+SUMMARY:Biomüll 01-wöchentl.
+DTSTART;TZID=Europe/Berlin:20261125T063000
+END:VEVENT
+END:VCALENDAR
+"""
+
+
+def test_stuttgart_format():
+    """Format der Abfallwirtschaft Stuttgart (service.stuttgart.de/lhs-services/aws/api/ical)."""
+    by = {}
+    for d, title in parse_ics(STUTTGART_ICS, date(2027, 6, 1)):
+        by.setdefault(classify(title, DEFAULT_TYPES), []).append(d)
+    assert by == {"rest": [date(2026, 11, 24)], "papier": [date(2026, 11, 26)],
+                  "gelb": [date(2026, 12, 3)], None: [date(2026, 11, 25)]}  # Bio nur, wenn eingerichtet

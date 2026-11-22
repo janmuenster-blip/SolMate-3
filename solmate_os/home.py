@@ -142,7 +142,7 @@ class HomeService:
 
     async def start(self) -> None:
         self._session = aiohttp.ClientSession(
-            timeout=aiohttp.ClientTimeout(total=20), headers={"User-Agent": "solmate-os"}
+            timeout=aiohttp.ClientTimeout(total=20), headers={"User-Agent": "solmate-os"}, trust_env=True
         )
         self._task = asyncio.create_task(self._run(), name="home-service")
 

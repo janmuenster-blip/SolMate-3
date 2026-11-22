@@ -1,0 +1,16 @@
+{
+  "name": "Hausansicht",
+  "short_name": "Haus",
+  "description": "Müllabfuhr, Akkus, Solar-Prognose und Stromkosten auf einen Blick",
+  "lang": "de",
+  "start_url": "/haus",
+  "scope": "/",
+  "display": "standalone",
+  "orientation": "any",
+  "background_color": "#0f1217",
+  "theme_color": "#0f1217",
+  "icons": [
+    { "src": "/icon-192.png", "sizes": "192x192", "type": "image/png" },
+    { "src": "/icon-512.png", "sizes": "512x512", "type": "image/png" }
+  ]
+}

@@ -204,6 +204,42 @@ WantedBy=multi-user.target
 sudo systemctl enable --now solmate-os
 ```
 
+## Als Dienst auf einem Mac (auch zugeklappt)
+
+Ein altes MacBook eignet sich gut als Dauerrechner. Das Skript `tools/macos/install.sh` richtet alles ein:
+Python-Umgebung, Hintergrunddienst (startet beim Hochfahren, auch ohne Anmeldung) und schaltet den Ruhezustand ab,
+damit der Mac **zugeklappt** weiterläuft.
+
+1. **Python 3.11+** von [python.org](https://www.python.org/downloads/macos/) installieren
+   („macOS 64-bit universal2 installer“), falls `python3 --version` eine ältere Version zeigt.
+2. Projekt auf den Mac holen (GitHub → „Code“ → „Download ZIP“, entpacken z. B. nach `~/solmate-os`)
+   und die eigene `config.toml` in diesen Ordner legen.
+3. Im Terminal:
+   ```bash
+   cd ~/solmate-os
+   ./tools/macos/install.sh
+   ```
+   macOS fragt einmal nach dem Mac-Passwort. Am Ende steht die Adresse fürs iPad, z. B. `http://MacBook.local:8080/haus`.
+4. Passwörter und Schlüssel (SolMate, EcoFlow, Shelly) in `~/.config/solmate-os/env` eintragen
+   (die Datei ist nur für Sie lesbar), dann `sudo launchctl kickstart -k system/de.solmate-os`.
+5. Mac zuklappen, am Netzteil lassen, fertig.
+
+| Aufgabe | Befehl |
+|---|---|
+| Protokoll ansehen | `tail -f ~/Library/Logs/solmate-os.log` |
+| Neu starten (z. B. nach Änderung der `config.toml`) | `sudo launchctl kickstart -k system/de.solmate-os` |
+| Aktualisieren | neue Version entpacken, `./tools/macos/install.sh` erneut ausführen |
+| Entfernen (Ruhezustand wieder normal) | `./tools/macos/install.sh --uninstall` |
+
+Hinweise:
+- Fragt macOS „Eingehende Verbindungen für Python erlauben?“, mit **Erlauben** bestätigen – sonst erreicht das iPad den Mac nicht.
+- Den Mac im WLAN lassen oder per Netzwerkkabel anschließen; im Router am besten eine feste IP vergeben.
+- Zugeklappt auf eine harte, freie Fläche legen (nicht aufs Sofa), damit die Wärme abziehen kann.
+- Alte Akkus können bei Dauerbetrieb am Netzteil anschwellen: Wölbt sich das Gehäuse oder schließt der Deckel nicht mehr
+  bündig, den Mac nicht weiter verwenden. Tools wie „AlDente“ begrenzen die Ladung auf z. B. 80 %.
+- Schläft der Mac zugeklappt trotzdem ein (einzelne Modelle/macOS-Versionen), alternativ einen externen Monitor
+  anschließen oder ihn aufgeklappt mit dunklem Bildschirm betreiben.
+
 ## Aufbau
 
 | Datei | Inhalt |

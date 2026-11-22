@@ -12,6 +12,8 @@ WebSocket-API von EET mit dem Gerät – entweder über den EET-Server oder dire
 
 ## Funktionen
 
+- **Hausansicht fürs iPad** (`/haus`): Müllabfuhr, Ladestand aller Akkus, PowerStream-Erzeugung mit Prognose,
+  EnBW-Stromtarif und Kosten auf einem Bildschirm – siehe [unten](#hausansicht-fürs-ipad)
 - **Boost-Button „800 W · 20 min“** ganz oben in der App: ein Tipp, volle Leistung, mit Countdown und Stopp
 - **Web-App fürs iPhone:** lässt sich auf den Home-Bildschirm legen, startet im Vollbild wie eine App, optional mit PIN
 - **EcoFlow-Stream-Anbindung:** SolMate und Stream teilen sich den Hausverbrauch, ohne gegeneinander zu arbeiten
@@ -77,6 +79,39 @@ Den Port **nicht** einfach im Router freigeben. Sicher und kostenlos geht es mit
 
 Über HTTPS hält die App zusätzlich ihre Oberfläche offline bereit (Service Worker).
 
+## Hausansicht fürs iPad
+
+Unter `http://<ip>:8080/haus` gibt es eine Übersicht für ein fest aufgestelltes iPad (optimiert für das
+iPad Pro 9,7" mit iPadOS 16, quer passt alles ohne Scrollen auf einen Bildschirm, hoch untereinander):
+
+| Kachel | Inhalt | Quelle |
+|---|---|---|
+| **Müllabfuhr** | Nächster Termin für Gelben Sack, Papier, Restmüll; Banner „Heute Abend rausstellen“ am Vortag | iCal-Link/-Datei der Gemeinde oder feste Rhythmen |
+| **Akkus** | Ladestand von SolMate 3, Stream und allen weiteren EcoFlow-Geräten, Laden/Entladen; Solar gesamt, Hausverbrauch, Netz | SolMate-API, EcoFlow-Developer-API, Smart Meter |
+| **Solar · PowerStream** | Erzeugung jetzt (PV1/PV2), Abgabe ins Haus, Ertrag heute; Prognose heute/morgen als Kurve mit Ist-Werten; Wetter für 3 Tage | EcoFlow-API, [Open-Meteo](https://open-meteo.com) (kostenlos, ohne Schlüssel) |
+| **Strom & Kosten** | Tarif, Netzbezug und Kosten heute/Monat, Ersparnis durch Solarstrom, Hochrechnung Guthaben/Nachzahlung, Zählerstand eintragen, Button zur EnBW-App | `[home.tariff]` + Smart Meter + eingetragene Zählerstände |
+
+**Einrichten** – alles im Abschnitt `[home]` der `config.toml` (Vorlage in `config.example.toml`):
+
+1. **Müllabfuhr:** Auf der Website Ihres Abfallwirtschaftsbetriebs den Abfuhrkalender für Ihre Straße als
+   iCal/ICS exportieren bzw. den Abo-Link kopieren und unter `[home.waste] ics_url` eintragen. Einträge werden über
+   Stichwörter zugeordnet („gelb“, „wertstoff“ → Gelber Sack; „papier“ → Papier; „rest“ → Restmüll), anpassbar
+   unter `[home.waste.types.*]`. Ohne Kalender gehen auch feste Rhythmen (`[[home.waste.rules]]`).
+2. **EcoFlow-Geräte:** `solmate-os -c config.toml ecoflow-devices` zeigt alle Seriennummern. Weitere Stream-Einheiten und
+   den PowerStream als `[[home.devices]]` eintragen. Prüfen: `solmate-os -c config.toml ecoflow-dump <SN>`.
+3. **Prognose:** Unter `[home.forecast]` Breiten-/Längengrad und je Modulfläche kWp, Neigung und Ausrichtung eintragen.
+4. **EnBW-Tarif:** EnBW bietet Privatkunden **keine offizielle Schnittstelle** an; ein automatischer Login in die EnBW-App
+   wäre unzuverlässig und verstößt gegen die Nutzungsbedingungen. Deshalb einmalig aus der EnBW-App bzw. „Mein EnBW“
+   übernehmen: Arbeitspreis, Grundpreis, Abschlag, Beginn des Abrechnungsjahres und Zählerstand zu diesem Datum.
+   Zählerstände trägt man dann in der Hausansicht ein (gleich wie in der EnBW-App) – daraus entsteht die Hochrechnung.
+   Der Button „EnBW-App öffnen“ führt zu „Mein EnBW“ (Ziel über `app_url` änderbar).
+
+**Aufs iPad:** In Safari `http://<ip>:8080/haus` öffnen → Teilen → **„Zum Home-Bildschirm“**. Für den Dauerbetrieb unter
+Einstellungen → Anzeige & Helligkeit → Automatische Sperre „Nie“ wählen und das iPad am Netzteil lassen
+(ab iPadOS 16.4 hält die Seite den Bildschirm zusätzlich selbst wach). Die Seite aktualisiert sich alle 30 Sekunden.
+
+Im Simulator (Standard) zeigt die Hausansicht Beispielgeräte und eine simulierte Prognose.
+
 ## EcoFlow STREAM einbinden
 
 SolMate OS liest über die **offizielle EcoFlow-Developer-API** den Zustand des Stream-Systems und des
@@ -127,6 +162,8 @@ solmate-os -c config.toml ecoflow-dump                 # EcoFlow-Rohdaten zur Fe
 | GET | `/api/history?hours=24` | Messwerte-Verlauf (SolMate und Stream) |
 | GET | `/api/energy` | Energiebilanz heute und 7 Tage |
 | GET | `/api/events` | Ereignisprotokoll |
+| GET | `/api/home` | Hausansicht: Müll, Akkus, Solar + Prognose, Tarif und Kosten |
+| POST | `/api/home/meter` | Zählerstand `{"kwh": 14420.5, "day": "2026-11-22"}`; `{"day": …, "delete": true}` löscht |
 | POST | `/api/automatic` | `{"enabled": true}` |
 | POST | `/api/settings` | `{"min_w": 100, "max_w": 600, "reserve_percent": 20, "minutes": 60}` |
 | POST | `/api/boost` | `{}` = Voreinstellung (800 W, 20 min); `{"watts": 600, "minutes": 30}`; 0 Minuten = beenden |
@@ -170,6 +207,10 @@ sudo systemctl enable --now solmate-os
 | `solmate_os/simulator.py` | Simulierter SolMate mit PV-, Batterie- und Wechselrichtermodell |
 | `solmate_os/ecoflow.py` | EcoFlow-API-Client (Signatur, Stream, Smart Meter) und Stream-Simulator |
 | `solmate_os/controller.py` | Regelautomatik und Entscheidungslogik |
+| `solmate_os/home.py` | Hausansicht: fasst alle Quellen zusammen, fragt weitere EcoFlow-Geräte ab |
+| `solmate_os/waste.py` | Abfallkalender (ICS mit Wiederholungen, feste Rhythmen) |
+| `solmate_os/forecast.py` | PV-Prognose über Open-Meteo |
+| `solmate_os/tariff.py` | Stromkosten, Ersparnis, Jahreshochrechnung |
 | `solmate_os/storage.py` | SQLite-Speicher, Verlauf, Energiebilanz |
 | `solmate_os/web.py`, `static/` | REST-API, Web-App, Manifest, Service Worker, Icons |
 | `solmate_os/cli.py` | Kommandozeile |
@@ -196,6 +237,9 @@ Zum Ausprobieren ohne Geräte: in `config.toml` `[device] mode = "simulator"` un
   [ecoflow-public-api](https://github.com/htims1989/ecoflow-public-api) (Stream Ultra X). Bei anderen Stream-Modellen
   mit `ecoflow-dump` prüfen. Die REST-Abfrage liefert laut EcoFlow teils weniger Felder als MQTT.
 - Beim Boost wird Strom, den das Haus gerade nicht braucht, ins Netz eingespeist.
+- PowerStream-Werte: Feldnamen und Einheit (0,1 W) laut EcoFlow-Developer-Doku; bei Abweichungen `watts_scale`
+  in `[[home.devices]]` setzen. Die Prognose ist eine Schätzung aus Wetterdaten, keine Garantie.
+- Kosten ohne EcoFlow Smart Meter: dann wird nur die Ersparnis berechnet, nicht der Netzbezug.
 - Am echten Gerät noch nicht getestet – bitte beim ersten Einsatz die Werte mit der SolMate-App vergleichen.
 
 ## Lizenz

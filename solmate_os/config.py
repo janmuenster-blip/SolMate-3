@@ -5,9 +5,13 @@ from __future__ import annotations
 import os
 import tomllib
 from dataclasses import dataclass, field
-from datetime import time
+from datetime import date, time
 from pathlib import Path
 from typing import Any
+
+from .forecast import ForecastConfig, Plane
+from .tariff import Tariff
+from .waste import DEFAULT_TYPES, WasteRule, WasteType
 
 
 def parse_hhmm(value: str) -> time:
@@ -35,6 +39,101 @@ class ScheduleRule:
         if now >= self.start:
             return weekday in self.weekdays
         return (weekday - 1) % 7 in self.weekdays and now < self.end
+
+
+@dataclass
+class HomeDevice:
+    """Weiteres EcoFlow-Gerät für die Hausansicht (Stream-Einheit oder PowerStream)."""
+
+    sn: str
+    name: str = ""
+    kind: str = "auto"  # auto | stream | powerstream
+    watts_scale: float | None = None  # PowerStream liefert 0,1 W → 0.1 (automatisch)
+
+
+@dataclass
+class HomeConfig:
+    title: str = "Unser Haus"
+    interval_s: float = 60.0
+    devices: list[HomeDevice] = field(default_factory=list)
+    waste_types: list[WasteType] = field(default_factory=lambda: list(DEFAULT_TYPES))
+    waste_ics_urls: list[str] = field(default_factory=list)
+    waste_ics_files: list[Path] = field(default_factory=list)
+    waste_rules: list[WasteRule] = field(default_factory=list)
+    forecast: ForecastConfig | None = None
+    tariff: Tariff = field(default_factory=Tariff)
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> "HomeConfig":
+        h = cls()
+        h.title = data.get("title", h.title)
+        h.interval_s = max(30.0, float(data.get("interval_s", h.interval_s)))
+        for d in data.get("devices", []):
+            kind = d.get("kind", "auto")
+            if kind not in ("auto", "stream", "powerstream"):
+                raise ValueError(f"Unbekannter Gerätetyp: {kind!r}")
+            h.devices.append(
+                HomeDevice(str(d["sn"]), d.get("name", ""), kind,
+                           float(d["watts_scale"]) if "watts_scale" in d else None)
+            )
+
+        w = data.get("waste", {})
+        names = {t.key: t for t in DEFAULT_TYPES}
+        for key, t in (w.get("types") or {}).items():
+            base = names.get(key)
+            names[key] = WasteType(
+                key,
+                t.get("name", base.name if base else key),
+                t.get("color", base.color if base else "#888888"),
+                tuple(k.lower() for k in t.get("keywords", base.keywords if base else (key,))),
+            )
+        h.waste_types = list(names.values())
+        urls = w.get("ics_url", [])
+        h.waste_ics_urls = [urls] if isinstance(urls, str) else list(urls)
+        files = w.get("ics_file", [])
+        h.waste_ics_files = [Path(f).expanduser() for f in ([files] if isinstance(files, str) else files)]
+        for r in w.get("rules", []):
+            if r["type"] not in names:
+                raise ValueError(f"Müll: unbekannte Tonne {r['type']!r}")
+            moved = {
+                date.fromisoformat(k): (_as_date(v) if v else None)
+                for k, v in (r.get("moved") or {}).items()
+            }
+            h.waste_rules.append(
+                WasteRule(r["type"], _as_date(r["start"]), int(r.get("every_weeks", 2)), moved)
+            )
+
+        f = data.get("forecast")
+        if f:
+            planes = [
+                Plane(float(p["kwp"]), float(p.get("tilt", 30)), float(p.get("azimuth", 0)), p.get("name", ""))
+                for p in f.get("planes", [])
+            ]
+            if not planes:
+                planes = [Plane(float(f.get("kwp", 0.8)), float(f.get("tilt", 30)), float(f.get("azimuth", 0)))]
+            h.forecast = ForecastConfig(
+                float(f["latitude"]), float(f["longitude"]), planes,
+                float(f.get("system_factor", 0.85)), float(f.get("max_ac_w", 800)),
+            )
+
+        t = data.get("tariff", {})
+        h.tariff = Tariff(
+            provider=t.get("provider", "EnBW"),
+            name=t.get("name", ""),
+            price_ct_kwh=float(t.get("price_ct_kwh", 0)),
+            base_eur_month=float(t.get("base_eur_month", 0)),
+            deposit_eur_month=float(t.get("deposit_eur_month", 0)),
+            contract_start=_as_date(t["contract_start"]) if t.get("contract_start") else None,
+            meter_start_kwh=float(t["meter_start_kwh"]) if "meter_start_kwh" in t else None,
+            feed_in_ct_kwh=float(t.get("feed_in_ct_kwh", 0)),
+            app_url=t.get("app_url", Tariff.app_url),
+            customer_number=str(t.get("customer_number", "")),
+        )
+        return h
+
+
+def _as_date(value: Any) -> date:
+    return value if isinstance(value, date) else date.fromisoformat(str(value))
 
 
 @dataclass
@@ -79,6 +178,7 @@ class Config:
     db_path: Path = Path("solmate.sqlite3")
     retention_days: int = 365
     token_path: Path = Path.home() / ".config" / "solmate-os" / "tokens.json"
+    home: HomeConfig = field(default_factory=HomeConfig)
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> "Config":
@@ -149,6 +249,9 @@ class Config:
         cfg.port = int(web.get("port", cfg.port))
         cfg.db_path = Path(sto.get("path", cfg.db_path))
         cfg.retention_days = int(sto.get("retention_days", cfg.retention_days))
+        cfg.home = HomeConfig.from_dict(data.get("home", {}))
+        if cfg.home.devices and cfg.mode != "simulator" and not (cfg.ecoflow_access_key and cfg.ecoflow_secret_key):
+            raise ValueError("Hausansicht: für [[home.devices]] werden die EcoFlow-Schlüssel aus [ecoflow] benötigt.")
         if "token_path" in dev:
             cfg.token_path = Path(dev["token_path"]).expanduser()
         return cfg

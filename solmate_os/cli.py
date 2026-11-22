@@ -14,9 +14,10 @@ from aiohttp import web
 
 from .backend import SolMateBackend
 from .client import SolMateClient, TokenStore
-from .config import Config
+from .config import Config, HomeDevice
 from .controller import Controller
 from .ecoflow import EcoFlowClient, SimulatedStream
+from .home import HomeService, parse_device
 from .simulator import SimulatedSolMate
 from .storage import Storage
 from .web import create_app
@@ -72,10 +73,13 @@ async def run_service(cfg: Config) -> None:
         await stream.start()
     ctl = Controller(cfg, backend, storage, stream=stream)
     await ctl.start()
-    runner = web.AppRunner(create_app(ctl))
+    home = HomeService(cfg, storage, ctl)
+    await home.start()
+    runner = web.AppRunner(create_app(ctl, home))
     await runner.setup()
     await web.TCPSite(runner, cfg.host, cfg.port).start()
-    logging.info("Weboberfläche: http://%s:%s", cfg.host, cfg.port)
+    logging.info("Weboberfläche: http://%s:%s  ·  Hausansicht fürs iPad: http://%s:%s/haus",
+                 cfg.host, cfg.port, cfg.host, cfg.port)
 
     stop = asyncio.Event()
     loop = asyncio.get_running_loop()
@@ -87,6 +91,7 @@ async def run_service(cfg: Config) -> None:
     await stop.wait()
     logging.info("Beende …")
     await runner.cleanup()
+    await home.stop()
     await ctl.stop()
     await backend.stop()
     if stream is not None:
@@ -94,13 +99,19 @@ async def run_service(cfg: Config) -> None:
     storage.close()
 
 
-async def ecoflow_tool(cfg: Config, action: str) -> None:
+async def ecoflow_tool(cfg: Config, action: str, sn: str | None = None) -> None:
     client = make_ecoflow_client(cfg)
     await client.start()
     try:
         if action == "ecoflow-devices":
             for dev in await client.device_list():
                 print(f"{dev.get('sn')}  {dev.get('productName', '')}  {dev.get('deviceName', '')}  online={dev.get('online')}")
+            print("\nWeitere Stream-Einheiten und PowerStream für die Hausansicht unter [[home.devices]] eintragen.")
+        elif sn:  # beliebiges Gerät, z. B. PowerStream
+            raw = await client.quota_all(sn)
+            print(json.dumps(raw, indent=2, ensure_ascii=False))
+            dev = next((d for d in cfg.home.devices if d.sn == sn), HomeDevice(sn))
+            print("\nErkannt:", json.dumps(parse_device(dev, raw), indent=2, ensure_ascii=False))
         else:
             if not cfg.ecoflow_stream_sn:
                 raise SystemExit("stream_sn fehlt in der config.toml")
@@ -150,7 +161,8 @@ def main(argv: list[str] | None = None) -> None:
     b.add_argument("minutes", type=float)
     b.add_argument("watts", type=float)
     sub.add_parser("ecoflow-devices", help="Geräte im EcoFlow-Konto auflisten (Seriennummern)")
-    sub.add_parser("ecoflow-dump", help="Rohdaten des Stream anzeigen (zur Fehlersuche)")
+    d = sub.add_parser("ecoflow-dump", help="Rohdaten des Stream oder eines anderen Geräts anzeigen (zur Fehlersuche)")
+    d.add_argument("sn", nargs="?", help="Seriennummer, z. B. des PowerStream (Standard: stream_sn)")
     args = p.parse_args(argv)
 
     logging.basicConfig(
@@ -159,7 +171,7 @@ def main(argv: list[str] | None = None) -> None:
     )
     cfg = Config.load(args.config)
     if args.cmd.startswith("ecoflow-"):
-        asyncio.run(ecoflow_tool(cfg, args.cmd))
+        asyncio.run(ecoflow_tool(cfg, args.cmd, getattr(args, "sn", None)))
         return
     if cfg.mode != "simulator" and not cfg.password and not TokenStore(cfg.token_path).get(
         f"{cfg.mode}:{cfg.serial}"

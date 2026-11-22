@@ -87,3 +87,81 @@ port = 8080
 [storage]
 path = "solmate.sqlite3"
 retention_days = 365
+
+# ==================================================================================================
+# Hausansicht fürs iPad: http://<ip>:8080/haus
+# Müllabfuhr, Akkus aller Geräte, PowerStream mit Prognose, Stromtarif und Kosten.
+# ==================================================================================================
+[home]
+title = "Unser Haus"
+interval_s = 60              # wie oft die EcoFlow-Geräte abgefragt werden
+
+# Weitere EcoFlow-Geräte (gleiche Schlüssel wie unter [ecoflow]). Seriennummern: solmate-os ecoflow-devices
+# Der Stream aus [ecoflow] erscheint automatisch und muss hier nicht noch einmal stehen.
+# Im Simulator werden ohne Einträge ein „Stream AC Pro“ und ein „PowerStream“ simuliert.
+# [[home.devices]]
+# name = "Stream AC Pro"
+# sn = "BK31..."
+# kind = "stream"            # stream | powerstream | auto
+#
+# [[home.devices]]
+# name = "PowerStream"
+# sn = "HW51..."
+# kind = "powerstream"
+
+# --- Müllabfuhr ---------------------------------------------------------------------------------
+# Am einfachsten: den iCal-Link (Abo-Link / .ics-Export) vom Abfallkalender Ihrer Gemeinde eintragen.
+# Mehrere Links sind möglich, z. B. ics_url = ["https://…/rest.ics", "https://…/gelb.ics"]
+[home.waste]
+# ics_url = "https://www.beispiel-abfallkalender.de/export/ical?strasse=…"
+# ics_file = "abfall.ics"    # alternativ heruntergeladene Datei
+
+# Ohne Kalenderdatei: feste Rhythmen. start = ein bekannter Abfuhrtermin.
+[[home.waste.rules]]
+type = "rest"                # rest | papier | gelb
+start = 2026-11-25
+every_weeks = 2
+
+[[home.waste.rules]]
+type = "gelb"
+start = 2026-11-27
+every_weeks = 2
+moved = { "2026-12-25" = "2026-12-27" }   # Feiertagsverschiebung; "" = fällt aus
+
+[[home.waste.rules]]
+type = "papier"
+start = 2026-12-03
+every_weeks = 4
+
+# Namen, Farben und Stichwörter der Tonnen (für die Zuordnung der Kalendereinträge) anpassbar:
+# [home.waste.types.gelb]
+# name = "Gelbe Tonne"
+# keywords = ["gelb", "wertstoff"]
+# [home.waste.types.bio]     # weitere Tonne hinzufügen
+# name = "Biotonne"
+# color = "#6b8e23"
+# keywords = ["bio"]
+
+# --- PV-Prognose (Open-Meteo, kostenlos) --------------------------------------------------------
+# [home.forecast]
+# latitude = 48.78            # Standort der Module
+# longitude = 9.18
+# max_ac_w = 800              # Wechselrichter-Grenze (PowerStream 600 oder 800)
+# system_factor = 0.85        # Verluste
+# [[home.forecast.planes]]    # je Modulfläche, z. B. PV1 und PV2 am PowerStream
+# name = "Balkon"
+# kwp = 0.86                  # Modulleistung in kWp (2 × 430 Wp = 0.86)
+# tilt = 70                   # Neigung in Grad (0 = flach, 90 = senkrecht)
+# azimuth = 0                 # 0 = Süd, -90 = Ost, 90 = West
+
+# --- Stromtarif (aus der EnBW-App / „Mein EnBW“ übernehmen) ------------------------------------
+[home.tariff]
+provider = "EnBW"
+name = "Komfort"              # Tarifname laut Vertrag
+price_ct_kwh = 0              # Arbeitspreis brutto in ct/kWh, z. B. 36.5
+base_eur_month = 0            # Grundpreis brutto in €/Monat, z. B. 14.90
+deposit_eur_month = 0         # monatlicher Abschlag in €
+# contract_start = 2026-01-01 # Beginn des Abrechnungszeitraums
+# meter_start_kwh = 12345.6   # Zählerstand zu diesem Datum
+# feed_in_ct_kwh = 0          # Einspeisevergütung (Balkonkraftwerk meist 0)
+# app_url = "https://www.enbw.com/mein-enbw"   # Ziel des Buttons „EnBW-App öffnen“

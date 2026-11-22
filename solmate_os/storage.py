@@ -21,6 +21,14 @@ CREATE TABLE IF NOT EXISTS stream_samples (
     pv_w REAL, battery_w REAL, soc REAL, feed_in_w REAL, grid_w REAL, load_w REAL
 );
 CREATE INDEX IF NOT EXISTS stream_samples_ts ON stream_samples(ts);
+CREATE TABLE IF NOT EXISTS home_samples (
+    ts TEXT NOT NULL, sn TEXT NOT NULL,
+    soc REAL, pv_w REAL, out_w REAL, battery_w REAL
+);
+CREATE INDEX IF NOT EXISTS home_samples_ts ON home_samples(sn, ts);
+CREATE TABLE IF NOT EXISTS meter_readings (
+    day TEXT PRIMARY KEY, kwh REAL NOT NULL
+);
 CREATE TABLE IF NOT EXISTS events (
     ts TEXT NOT NULL, level TEXT NOT NULL, message TEXT NOT NULL
 );
@@ -79,6 +87,65 @@ class Storage:
             out["grid_import_wh" if e > 0 else "grid_export_wh"] += abs(e)
         return {k: round(v, 1) for k, v in out.items()}
 
+    # --- Hausansicht: weitere EcoFlow-Geräte, Zählerstände --------------------------------------
+
+    def add_home_sample(
+        self, ts: datetime, sn: str, soc: float | None, pv_w: float | None, out_w: float | None,
+        battery_w: float | None = None,
+    ) -> None:
+        self.db.execute(
+            "INSERT INTO home_samples VALUES (?, ?, ?, ?, ?, ?)",
+            (ts.astimezone(timezone.utc).isoformat(), sn, soc, pv_w, out_w, battery_w),
+        )
+        self.db.commit()
+
+    def home_history(self, sn: str, since: datetime, max_points: int = 300) -> list[dict[str, Any]]:
+        rows = self.db.execute(
+            "SELECT ts, soc, pv_w, out_w FROM home_samples WHERE sn = ? AND ts >= ? ORDER BY ts",
+            (sn, since.astimezone(timezone.utc).isoformat()),
+        ).fetchall()
+        step = max(1, len(rows) // max_points)
+        return [dict(r) for r in rows[::step]]
+
+    def _integrate(self, query: str, params: tuple, columns: list[str]) -> dict[str, float]:
+        """Trapezregel über positive Werte je Spalte (Wh). Lücken > 30 min werden nicht überbrückt."""
+        rows = self.db.execute(query, params).fetchall()
+        out = {c: 0.0 for c in columns}
+        for a, b in zip(rows, rows[1:]):
+            dt_h = (datetime.fromisoformat(b["ts"]) - datetime.fromisoformat(a["ts"])).total_seconds() / 3600
+            if dt_h <= 0 or dt_h > 0.5:
+                continue
+            for c in columns:
+                if a[c] is None or b[c] is None:
+                    continue
+                out[c] += max(0.0, (a[c] + b[c]) / 2) * dt_h
+        return {k: round(v, 1) for k, v in out.items()}
+
+    def home_energy(self, sn: str, since: datetime) -> dict[str, float]:
+        e = self._integrate(
+            "SELECT ts, pv_w, out_w FROM home_samples WHERE sn = ? AND ts >= ? ORDER BY ts",
+            (sn, since.astimezone(timezone.utc).isoformat()), ["pv_w", "out_w"],
+        )
+        return {"pv_wh": e["pv_w"], "out_wh": e["out_w"]}
+
+    def stream_feed_energy(self, since: datetime) -> float:
+        e = self._integrate(
+            "SELECT ts, feed_in_w FROM stream_samples WHERE ts >= ? ORDER BY ts",
+            (since.astimezone(timezone.utc).isoformat(),), ["feed_in_w"],
+        )
+        return e["feed_in_w"]
+
+    def set_meter_reading(self, day: str, kwh: float) -> None:
+        self.db.execute("INSERT OR REPLACE INTO meter_readings VALUES (?, ?)", (day, kwh))
+        self.db.commit()
+
+    def delete_meter_reading(self, day: str) -> None:
+        self.db.execute("DELETE FROM meter_readings WHERE day = ?", (day,))
+        self.db.commit()
+
+    def meter_readings(self) -> list[dict[str, Any]]:
+        return [dict(r) for r in self.db.execute("SELECT day, kwh FROM meter_readings ORDER BY day")]
+
     def add_event(self, level: str, message: str, ts: datetime | None = None) -> None:
         ts = (ts or datetime.now(timezone.utc)).astimezone(timezone.utc)
         self.db.execute("INSERT INTO events VALUES (?, ?, ?)", (ts.isoformat(), level, message))
@@ -119,6 +186,7 @@ class Storage:
         cutoff = (datetime.now(timezone.utc) - timedelta(days=retention_days)).isoformat()
         cur = self.db.execute("DELETE FROM samples WHERE ts < ?", (cutoff,))
         self.db.execute("DELETE FROM stream_samples WHERE ts < ?", (cutoff,))
+        self.db.execute("DELETE FROM home_samples WHERE ts < ?", (cutoff,))
         self.db.execute("DELETE FROM events WHERE ts < ?", (cutoff,))
         self.db.commit()
         return cur.rowcount

@@ -5,7 +5,7 @@ from __future__ import annotations
 import asyncio
 import hashlib
 import hmac
-from datetime import timedelta
+from datetime import date, timedelta
 from pathlib import Path
 
 from aiohttp import web
@@ -14,7 +14,9 @@ from .controller import Controller
 
 STATIC = Path(__file__).parent / "static"
 COOKIE = "solmate_os"
-PUBLIC = {"/login", "/manifest.webmanifest", "/sw.js", "/icon-180.png", "/icon-192.png", "/icon-512.png"}
+PUBLIC = {
+    "/login", "/manifest.webmanifest", "/haus.webmanifest", "/sw.js", "/icon-180.png", "/icon-192.png", "/icon-512.png",
+}
 
 
 def _number(body: dict, key: str, default: float | None = None) -> float:
@@ -40,10 +42,15 @@ input{background:#1b2029;color:inherit;text-align:center;font-size:24px;letter-s
 button{background:#5b9cf0;color:#fff;border:0;font-weight:600}p{color:#ef6b6b;text-align:center;margin:0}</style>
 </head><body><form method="post" action="/login"><h1 style="text-align:center;margin:0 0 8px">SolMate</h1>
 <input name="pin" type="password" inputmode="numeric" autocomplete="current-password" placeholder="PIN" autofocus required>
-<button>Anmelden</button>__ERROR__</form></body></html>"""
+<input type="hidden" name="next" value="__NEXT__"><button>Anmelden</button>__ERROR__</form></body></html>"""
 
 
-def create_app(ctl: Controller) -> web.Application:
+def _login_page(error: str, nxt: str) -> str:
+    nxt = nxt if nxt in ("/", "/haus") else "/"
+    return LOGIN_PAGE.replace("__ERROR__", error).replace("__NEXT__", nxt)
+
+
+def create_app(ctl: Controller, home=None) -> web.Application:
     routes = web.RouteTableDef()
     pin = ctl.cfg.pin
 
@@ -55,28 +62,29 @@ def create_app(ctl: Controller) -> web.Application:
             if not (by_cookie or by_header):
                 if request.path.startswith("/api/"):
                     raise web.HTTPUnauthorized(text="PIN erforderlich")
-                raise web.HTTPFound("/login")
+                raise web.HTTPFound("/login?next=/haus" if request.path == "/haus" else "/login")
         response = await handler(request)
         if request.path.startswith("/api/"):
             response.headers["Cache-Control"] = "no-store"
         return response
 
     @routes.get("/login")
-    async def login_form(_: web.Request) -> web.Response:
+    async def login_form(req: web.Request) -> web.Response:
         if not pin:
             raise web.HTTPFound("/")
-        return web.Response(text=LOGIN_PAGE.replace("__ERROR__", ""), content_type="text/html")
+        return web.Response(text=_login_page("", req.query.get("next", "/")), content_type="text/html")
 
     @routes.post("/login")
     async def login(req: web.Request) -> web.Response:
         form = await req.post()
         if pin and hmac.compare_digest(str(form.get("pin", "")), pin):
-            resp = web.HTTPFound("/")
+            target = str(form.get("next", "/"))
+            resp = web.HTTPFound(target if target in ("/", "/haus") else "/")
             resp.set_cookie(COOKIE, _token(pin), max_age=400 * 24 * 3600, httponly=True, samesite="Strict")
             raise resp
         await asyncio.sleep(1.5)  # bremst Durchprobieren
         return web.Response(
-            text=LOGIN_PAGE.replace("__ERROR__", "<p>Falsche PIN</p>"), content_type="text/html", status=401
+            text=_login_page("<p>Falsche PIN</p>", str(form.get("next", "/"))), content_type="text/html", status=401
         )
 
     @routes.get("/")
@@ -86,6 +94,38 @@ def create_app(ctl: Controller) -> web.Application:
     @routes.get("/manifest.webmanifest")
     async def manifest(_: web.Request) -> web.FileResponse:
         return web.FileResponse(STATIC / "manifest.webmanifest", headers={"Content-Type": "application/manifest+json"})
+
+    @routes.get("/haus")
+    async def haus(_: web.Request) -> web.FileResponse:
+        return web.FileResponse(STATIC / "haus.html", headers={"Cache-Control": "no-cache"})
+
+    @routes.get("/haus.webmanifest")
+    async def haus_manifest(_: web.Request) -> web.FileResponse:
+        return web.FileResponse(STATIC / "haus.webmanifest", headers={"Content-Type": "application/manifest+json"})
+
+    @routes.get("/api/home")
+    async def home_status(_: web.Request) -> web.Response:
+        if home is None:
+            raise web.HTTPNotFound(text="Hausansicht nicht aktiv")
+        return web.json_response(home.summary())
+
+    @routes.post("/api/home/meter")
+    async def meter_reading(req: web.Request) -> web.Response:
+        if home is None:
+            raise web.HTTPNotFound(text="Hausansicht nicht aktiv")
+        body = await req.json()
+        try:
+            day = date.fromisoformat(body.get("day") or date.today().isoformat())
+        except (TypeError, ValueError):
+            raise web.HTTPBadRequest(text="'day' muss JJJJ-MM-TT sein")
+        if body.get("delete"):
+            ctl.storage.delete_meter_reading(day.isoformat())
+        else:
+            kwh = _number(body, "kwh")
+            if kwh < 0 or day > date.today():
+                raise web.HTTPBadRequest(text="Zählerstand ungültig")
+            ctl.storage.set_meter_reading(day.isoformat(), kwh)
+        return web.json_response(home.summary())
 
     @routes.get("/sw.js")
     async def service_worker(_: web.Request) -> web.FileResponse:
